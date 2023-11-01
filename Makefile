@@ -6,6 +6,11 @@ TARGET ?= /kb/deployment
 
 APP_SERVICE = app_service
 
+APP_CXX = kmers-call-functions kmers-build-signatures
+BIN_CXX = $(addprefix $(BIN_DIR)/,$(APP_CXX))
+DEPLOY_CXX = $(addprefix $(TARGET)/bin,$(APP_CXX))
+
+
 SRC_PERL = $(wildcard scripts/*.pl)
 BIN_PERL = $(addprefix $(BIN_DIR)/,$(basename $(notdir $(SRC_PERL))))
 DEPLOY_PERL = $(addprefix $(TARGET)/bin/,$(basename $(notdir $(SRC_PERL))))
@@ -27,32 +32,53 @@ TPAGE_ARGS = --define kb_top=$(TARGET) --define kb_runtime=$(DEPLOY_RUNTIME) --d
 	--define kb_starman_workers=$(STARMAN_WORKERS) \
 	--define kb_starman_max_requests=$(STARMAN_MAX_REQUESTS)
 
-all: bin 
+all: bin
 
-bin: $(BIN_PERL) $(BIN_SERVICE_PERL)
+NuDB:
+	git clone https://github.com/CPPAlliance/NuDB.git
+
+bin: NuDB $(BIN_PERL) $(BIN_SERVICE_PERL) $(BIN_CXX)
+
+INC = $(BOOST_INC) $(TBB_FLAGS) $(NUDB_INCLUDE)
+OPT = -g -O3
+
+CXXFLAGS = $(OPT) $(INC)
+LDFLAGS = -Wl,-rpath,$(BOOST)/lib
+
+LIBS = $(BOOST_LIBS) $(TBB_LIBS)
+
+BOOST = $(KB_RUNTIME)/boost-latest
+
+BOOST_INC = -I$(BOOST)/include
+BOOST_LIBS = \
+	-L $(BOOST)/lib \
+	-lboost_program_options \
+	-lboost_filesystem \
+	-lboost_thread \
+	-lboost_regex
+
+#
+# Parallel algorithms on ubuntu result in TBB deprecation messages
+#
+TBB_FLAGS = -DTBB_SUPPRESS_DEPRECATED_MESSAGES=1 
+TBB_LIBS = -ltbbmalloc -ltbb
+
+NUDB = NuDB
+NUDB_INCLUDE = -I$(NUDB)/include
+
+KMERS_CALL_FUNCTIONS_OBJS = src/kmers-call-functions.o src/fasta_parser.o
+kmers-call-functions: NuDB $(KMERS_CALL_FUNCTIONS_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_CALL_FUNCTIONS_OBJS) $(LIBS)
+
+KMERS_BUILD_SIGNATURES = src/kmers-build-signatures.o src/fasta_parser.o
+kmers-build-signatures: NuDB $(KMERS_BUILD_SIGNATURES)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_BUILD_SIGNATURES) $(LIBS)
 
 deploy: deploy-all
 deploy-all: deploy-client 
 deploy-client: deploy-libs deploy-scripts deploy-docs
 
 deploy-service: deploy-libs deploy-scripts deploy-service-scripts deploy-specs
-
-deploy-specs:
-	mkdir -p $(TARGET)/services/$(APP_SERVICE)
-	rsync -arv app_specs $(TARGET)/services/$(APP_SERVICE)/.
-
-deploy-service-scripts:
-	export KB_TOP=$(TARGET); \
-	export KB_RUNTIME=$(DEPLOY_RUNTIME); \
-	export KB_PERL_PATH=$(TARGET)/lib ; \
-	for src in $(SRC_SERVICE_PERL) ; do \
-	        basefile=`basename $$src`; \
-	        base=`basename $$src .pl`; \
-	        echo install $$src $$base ; \
-	        cp $$src $(TARGET)/plbin ; \
-	        $(WRAP_PERL_SCRIPT) "$(TARGET)/plbin/$$basefile" $(TARGET)/bin/$$base ; \
-	done
-
 
 deploy-dir:
 	if [ ! -d $(SERVICE_DIR) ] ; then mkdir $(SERVICE_DIR) ; fi
