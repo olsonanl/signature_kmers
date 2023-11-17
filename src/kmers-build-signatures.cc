@@ -3,6 +3,8 @@
 #include "kept_kmer_db.h"
 #include "call_functions.h"
 #include "nudb_kmer_db.h"
+#include "perfect_hash.h"
+#include "cmph_kmer.h"
 
 #include <boost/program_options.hpp>
 
@@ -14,18 +16,19 @@ namespace fs = boost::filesystem;
 
 const int K = 8;
 const int MaxSequencesPerFile = 100000;
-
 static bool process_command_line_options(int argc, char *argv[],
-				  std::vector<fs::path> &function_definitions,
-				  std::vector<fs::path> &fasta_data,
-				  std::vector<fs::path> &fasta_data_kept_functions,
-				  std::vector<std::string> &good_functions,
-				  std::vector<std::string> &good_roles,
-				  fs::path &deleted_fids_file,
-				  int &min_reps_required,
-				  fs::path &kmer_data_dir,
-				  fs::path &final_kmers,
-				  std::string &nudb_file,
+					 std::vector<fs::path> &function_definitions,
+					 std::vector<fs::path> &fasta_data,
+					 std::vector<fs::path> &fasta_data_kept_functions,
+					 std::vector<std::string> &good_functions,
+					 std::vector<std::string> &good_roles,
+					 fs::path &deleted_fids_file,
+					 int &min_reps_required,
+					 fs::path &kmer_data_dir,
+					 fs::path &final_kmers,
+					 std::string &nudb_file,
+					 fs::path &perfect_hash,
+					 fs::path &perfect_hash_data,
 				  int &n_threads)
 {
     std::ostringstream x;
@@ -52,6 +55,8 @@ static bool process_command_line_options(int argc, char *argv[],
 	("min-reps-required", po::value<int>(&min_reps_required), "Minimum number of genomes a function must be seen in to be considered for kmers")
 	("final-kmers", po::value<fs::path>(&final_kmers), "Write final.kmers file to be consistent with km_build_Data")
 	("n-threads", po::value<int>(&n_threads), "Number of threads to use")
+	("perfect-hash", po::value<fs::path>(&perfect_hash), "Compute perfect hash of signature kmers and store in this file")
+	("perfect-hash-data", po::value<fs::path>(&perfect_hash_data), "Kmer data stored by perfect hash")
 	("help,h", "show this help message");
 
     po::variables_map vm;
@@ -134,6 +139,8 @@ int main(int argc, char *argv[])
     int n_threads;
 
     std::string nudb_file;
+    fs::path perfect_hash_file;
+    fs::path perfect_hash_data_file;
 
     if (!process_command_line_options(argc, argv,
 				      function_definitions,
@@ -146,6 +153,8 @@ int main(int argc, char *argv[])
 				      kmer_data_dir,
 				      final_kmers,
 				      nudb_file,
+				      perfect_hash_file,
+				      perfect_hash_data_file,
 				      n_threads))
     {
 	return 1;
@@ -180,20 +189,30 @@ int main(int argc, char *argv[])
     builder.extract_kmers(deleted_fids); 
     std::cerr << "process kmers\n";
     builder.process_kmers();
-    
+
+    std::thread final_kmers_thread;
     if (!final_kmers.empty())
     {
-	std::cerr << "writing kmers to " << final_kmers << "\n";
-	fs::ofstream kf(final_kmers);
-	std::for_each(builder.kept_kmers().begin(), builder.kept_kmers().end(),
-		      [&kf](const auto &k) {
-			  const auto &v = k.second;
-			  kf <<
-			      k.first << "\t" <<
-			      v.stored_data.avg_from_end << "\t" <<
-			      v.stored_data.function_index << "\t" <<
-			      "\n";
-	    // kf << "\t" << k.seqs_containing_sig << "\t" << kmer_stats.seqs_with_func[k.function_index] << "\n";
+	if (final_kmers.is_relative())
+	{
+	    final_kmers = kmer_data_dir / final_kmers;
+	    std::cerr << "Updated final_kmers to " << final_kmers << "\n";
+	}
+	final_kmers_thread = std::thread([&final_kmers, &builder] {
+	    std::cerr << "writing kmers to " << final_kmers << "\n";
+	    fs::ofstream kf(final_kmers);
+	    std::for_each(builder.kept_kmers().begin(), builder.kept_kmers().end(),
+			  [&kf](const auto &k) {
+			      const auto &v = k.second;
+			      kf <<
+				  k.first << "\t" <<
+				  v.stored_data.avg_from_end << "\t" <<
+				  v.stored_data.function_index << "\t" <<
+				  "\n";
+			      // kf << "\t" << k.seqs_containing_sig << "\t" << kmer_stats.seqs_with_func[k.function_index] << "\n";
+			  });
+	    std::cerr << "writing kmers to " << final_kmers << " complete\n";
+
 	});
     }
 
@@ -220,6 +239,24 @@ int main(int argc, char *argv[])
     }
 
     std::string fi_file = (kmer_data_dir / "function.index").string();
+
+    /*
+     * If we're saving a perfect hash, start a thread to begin the compute and
+     * write the output.
+     */
+
+    std::thread perfect_hash_thread;
+    if (!perfect_hash_file.empty())
+    {
+	if (perfect_hash_file.is_relative())
+	    perfect_hash_file = kmer_data_dir / perfect_hash_file;
+	if (perfect_hash_data_file.is_relative())
+	    perfect_hash_data_file = kmer_data_dir / perfect_hash_data_file;
+	
+	perfect_hash_thread = std::thread([&builder, &perfect_hash_file, &perfect_hash_data_file]() {
+	    build_perfect_hash<K>(builder, perfect_hash_file, perfect_hash_data_file);
+	});
+    }
 
     /*
      * Begin recall of source data using newly created kmers.
@@ -267,7 +304,7 @@ int main(int argc, char *argv[])
 	
     };
 
-    auto hit_cb = [&builder](const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &k) {
+    auto hit_cb = [&builder](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &k) {
 
 	if (false)
 	{
@@ -310,6 +347,18 @@ int main(int argc, char *argv[])
     {
 	std::cerr << "write nudb data " << nudb_file << "\n";
 	write_nudb_data(nudb_file, builder.kept_kmers());
+    }
+
+    if (perfect_hash_thread.joinable())
+    {
+	std::cerr << "Awaiting completion of perfect hash creation\n";
+	perfect_hash_thread.join();
+    }
+
+    if (final_kmers_thread.joinable())
+    {
+	std::cerr << "Awaiting completion of final kmers dump\n";
+	final_kmers_thread.join();
     }
 
     std::cerr << "all done\n";

@@ -154,7 +154,7 @@ void FunctionCaller<KmerDb>::process_fasta_stream(std::istream &istr, HitCB &hit
 	    float score;
 	    float offset;
 	    find_best_call(id, *calls, fi, func, score, offset);
-	    call_cb(id, func, fi, score);
+	    call_cb(id, func, fi, score, seq.size());
 	    // std::cout << id << "\t" << func << "\t" << fi << "\t" << score << "\n";
 	    return 0;
 	});
@@ -177,15 +177,15 @@ void FunctionCaller<KmerDb>::process_aa_seq(const std::string &idstr, const std:
     HitSet<KmerDb> hits(seqstr.length(), min_hits_);
     FunctionIndex current_fI = UndefinedFunction;
     double seqlen = static_cast<double>(seqstr.length());
-    for_each_kmer<KmerDb::KmerSize>(seqstr, [this, &calls, &hit_cb, &hits, &current_fI, seqlen]
+    for_each_kmer<KmerDb::KmerSize>(seqstr, [this, &idstr, &calls, &hit_cb, &hits, &current_fI, seqlen]
 				    (const std::array<char, KmerDb::KmerSize> &kmer, size_t offset) {
 	// std::cerr << "process " << kmer << "\n";
 	
 	int ec;
-	kmer_db_.fetch(kmer, [this, hit_cb, offset, &hits, &calls, &current_fI, &kmer, seqlen]
+	kmer_db_.fetch(kmer, [this, hit_cb, offset, &idstr, &hits, &calls, &current_fI, &kmer, seqlen]
 		      (const StoredKmerData &kdata) {
 
-	    hit_cb(kmer, offset, seqlen, kdata);
+	    hit_cb(idstr, kmer, offset, seqlen, kdata);
 
 	    // std::cerr << kmer << "\t" << offset << "\t" << kdata->function_index << "\n";
 	    // Is this hit beyond max_gap_ of the last one?
@@ -403,7 +403,7 @@ void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<K
 	    }
 		
 	}
-	std::cout << id << "\t" << exp << "\n";
+//	std::cout << id << "\t" << exp << "\n";
 #if DEBUG_SCORING
 	std::cout << "Exp list: " << exp << "\n";
 	for (auto x: fusion_parts) {
@@ -429,10 +429,12 @@ void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<K
 	    auto frac_dif = abs(diff) / w_mean;
 	    if (frac_dif < 0.1)
 	    {
+#if DEBUG_SCORING
 		std::cout << "call fusion " << id << " " << exp << "\n";
 		std::cout << a_mean << " " << w_mean << " " << b_mean << " " << diff  << " " << frac_dif << "\n";
 		for (auto x: fusion_parts) 
 		    std::cout << x.ident << ": " << x.call << "\n";
+#endif		
 		function_index = key_to_function_info['W'].first;
 		function = key_to_function_info['W'].second;
 		score = sum_scores;
@@ -441,8 +443,8 @@ void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<K
 	    }
 	    else
 	    {
-		std::cout << "no-call fusion " << id << " " << exp << "\n";
-		std::cout << a_mean << " " << w_mean << " " << b_mean << " " << diff  << " " << frac_dif << "\n";
+		// std::cout << "no-call fusion " << id << " " << exp << "\n";
+		// std::cout << a_mean << " " << w_mean << " " << b_mean << " " << diff  << " " << frac_dif << "\n";
 	    }
 	}
 	    

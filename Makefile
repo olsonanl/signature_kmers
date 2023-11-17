@@ -39,13 +39,16 @@ NuDB:
 
 bin: NuDB $(BIN_PERL) $(BIN_SERVICE_PERL) $(BIN_CXX)
 
-INC = $(BOOST_INC) $(TBB_FLAGS) $(NUDB_INCLUDE)
-OPT = -g -O3
+#PROFILE = -pg
+OPT = -O3
+DEBUG = -g
+INC = $(BOOST_INC) $(TBB_FLAGS) $(NUDB_INCLUDE) $(CMPH_INCLUDE)
 
-CXXFLAGS = $(OPT) $(INC)
-LDFLAGS = -Wl,-rpath,$(BOOST)/lib
 
-LIBS = $(BOOST_LIBS) $(TBB_LIBS)
+CXXFLAGS = $(PROFILE) $(DEBUG) $(OPT) $(INC)
+LDFLAGS = -Wl,-rpath,$(BOOST)/lib -Wl,-rpath,$(CMPH)/lib $(PROFILE)
+
+LIBS = $(BOOST_LIBS) $(TBB_LIBS) $(CMPH_LIB)
 
 BOOST = $(KB_RUNTIME)/boost-latest
 
@@ -60,8 +63,12 @@ BOOST_LIBS = \
 #
 # Parallel algorithms on ubuntu result in TBB deprecation messages
 #
-TBB_FLAGS = -DTBB_SUPPRESS_DEPRECATED_MESSAGES=1 
+TBB_FLAGS = -DTBB_SUPPRESS_DEPRECATED_MESSAGES=1 -DTBB_PREVIEW_CONCURRENT_ORDERED_CONTAINERS=1
 TBB_LIBS = -ltbbmalloc -ltbb
+
+CMPH = $(shell pwd)
+CMPH_INCLUDE = -I$(CMPH)/include
+CMPH_LIB = -L$(CMPH)/lib -lcmph
 
 NUDB = NuDB
 NUDB_INCLUDE = -I$(NUDB)/include
@@ -70,9 +77,19 @@ KMERS_CALL_FUNCTIONS_OBJS = src/kmers-call-functions.o src/fasta_parser.o
 kmers-call-functions: NuDB $(KMERS_CALL_FUNCTIONS_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_CALL_FUNCTIONS_OBJS) $(LIBS)
 
+KMERS_MATRIX_DISTANCE_OBJS = src/kmers-matrix-distance.o src/fasta_parser.o
+kmers-matrix-distance: $(KMERS_MATRIX_DISTANCE_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_MATRIX_DISTANCE_OBJS) $(LIBS)
+
 KMERS_BUILD_SIGNATURES = src/kmers-build-signatures.o src/fasta_parser.o
 kmers-build-signatures: NuDB $(KMERS_BUILD_SIGNATURES)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_BUILD_SIGNATURES) $(LIBS)
+
+tst-cmph: src/tst-cmph.o
+	$(CXX) $(LDFLAGS) -o $@ src/tst-cmph.o $(LIBS)
+
+write-cmph-from-kmers: src/write-cmph-from-kmers.o
+	$(CXX) $(LDFLAGS) -o $@ src/write-cmph-from-kmers.o $(LIBS)
 
 deploy: deploy-all
 deploy-all: deploy-client 
