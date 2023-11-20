@@ -54,7 +54,7 @@ void process_options(int argc, char **argv, program_parameters &params)
     desc.add_options()
 	("data-dir,d", po::value<fs::path>(&params.data_dir), "Data directory")
 	("input-file,i", po::value<fs::path>(&params.fasta_file), "Input fasta file")
-	("output-files,o", po::value<fs::path>(&params.output_file), "Output file")
+	("output-file,o", po::value<fs::path>(&params.output_file), "Output file")
 	("n-threads,j", po::value<int>(&params.n_threads), "Number of threads")
 	("debug-hits", po::bool_switch(&params.debug_hits), "Debug kmer hits")
 	("help,h", "show this help message");
