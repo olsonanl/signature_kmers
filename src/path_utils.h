@@ -14,7 +14,8 @@
   @param dirs List of directories to load
   @param paths List of paths to populate
 */
-void populate_path_list(const std::vector<std::string> &dirs, std::vector<fs::path> &paths)
+template <typename ListType>
+void populate_path_list(const std::vector<std::string> &dirs, ListType &paths)
 {
     for (auto dir: dirs)
     {
@@ -25,6 +26,18 @@ void populate_path_list(const std::vector<std::string> &dirs, std::vector<fs::pa
 	    {
 		paths.emplace_back(dit);
 	    }
+	}
+    }
+}    
+
+template <typename ListType>
+void populate_path_list(const fs::path &dir, ListType &paths)
+{
+    for (auto dit: fs::directory_iterator(dir))
+    {
+	if (fs::is_regular_file(dit.path()))
+	{
+	    paths.emplace_back(dit);
 	}
     }
 }    
