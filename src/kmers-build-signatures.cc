@@ -280,7 +280,7 @@ int main(int argc, char *argv[])
 	const FunctionMap &fm;
 	std::map<std::string, call_data> data;
 	
-	void operator()(const std::string &id, const std::string &func, int func_index, float score) {
+	void operator()(const std::string &id, const std::string &func, int func_index, float score, size_t seq_len) {
 
 	    std::string orig, orig_stripped;
 	    fm.lookup_original_assignment(id, orig, orig_stripped);
