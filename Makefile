@@ -73,6 +73,10 @@ CMPH_LIB = -L$(CMPH)/lib -lcmph
 NUDB = NuDB
 NUDB_INCLUDE = -I$(NUDB)/include
 
+KMERS_ANNOTATE_SEQS_OBJS = src/kmers-annotate-seqs.o src/fasta_parser.o
+kmers-annotate-seqs: NuDB $(KMERS_ANNOTATE_SEQS_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_ANNOTATE_SEQS_OBJS) $(LIBS)
+
 KMERS_CALL_FUNCTIONS_OBJS = src/kmers-call-functions.o src/fasta_parser.o
 kmers-call-functions: NuDB $(KMERS_CALL_FUNCTIONS_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_CALL_FUNCTIONS_OBJS) $(LIBS)
