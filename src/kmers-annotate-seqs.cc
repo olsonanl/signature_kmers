@@ -144,9 +144,11 @@ int main(int argc, char **argv)
 	    
 	    caller.process_fasta_stream(ifstr, hit_cb, call2_cb);
 	    
-	    
 	    ifstr.close();
-	    output_queue.push(buf);
+	    if (buf->size() > 0)
+	    {
+		output_queue.push(buf);
+	    }
 	}
     });
 

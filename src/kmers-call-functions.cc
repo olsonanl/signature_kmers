@@ -155,16 +155,18 @@ int main(int argc, char **argv)
 	    
 	    std::ostream bufstr(buf.get());
 	    
-	    auto call2_cb = [&bufstr](const std::string &id, const std::string &func, FunctionIndex func_index, float score)
+	    auto call2_cb = [&bufstr](const std::string &id, const std::string &func, FunctionIndex func_index, float score, size_t seq_size)
 		{
 		    bufstr << id << "\t" << func << "\t" << func_index << "\t" << score << "\n";
 		};
 	    
 	    caller.process_fasta_stream(ifstr, hit_cb, call2_cb);
 	    
-	    
 	    ifstr.close();
-	    output_queue.push(buf);
+	    if (buf->size() > 0)
+	    {
+		output_queue.push(buf);
+	    }
 	}
     });
 
