@@ -6,7 +6,7 @@ TARGET ?= /kb/deployment
 
 APP_SERVICE = app_service
 
-APP_CXX = kmers-call-functions kmers-build-signatures
+APP_CXX = kmers-call-functions kmers-build-signatures kmers-matrix-distance kmers-annotate-seqs
 BIN_CXX = $(addprefix $(BIN_DIR)/,$(APP_CXX))
 DEPLOY_CXX = $(addprefix $(TARGET)/bin,$(APP_CXX))
 
