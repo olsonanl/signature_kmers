@@ -6,7 +6,7 @@ TARGET ?= /kb/deployment
 
 APP_SERVICE = app_service
 
-APP_CXX = kmers-call-functions kmers-build-signatures kmers-matrix-distance kmers-annotate-seqs
+APP_CXX = kmers-call-functions kmers-build-signatures kmers-matrix-distance kmers-matrix-distance-folder kmers-annotate-seqs
 BIN_CXX = $(addprefix $(BIN_DIR)/,$(APP_CXX))
 DEPLOY_CXX = $(addprefix $(TARGET)/bin,$(APP_CXX))
 
@@ -80,6 +80,10 @@ kmers-annotate-seqs: NuDB $(KMERS_ANNOTATE_SEQS_OBJS)
 KMERS_CALL_FUNCTIONS_OBJS = src/kmers-call-functions.o src/fasta_parser.o
 kmers-call-functions: NuDB $(KMERS_CALL_FUNCTIONS_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_CALL_FUNCTIONS_OBJS) $(LIBS)
+
+KMERS_MATRIX_DISTANCE_FOLDER_OBJS = src/kmers-matrix-distance-folder.o src/fasta_parser.o
+kmers-matrix-distance-folder: $(KMERS_MATRIX_DISTANCE_FOLDER_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_MATRIX_DISTANCE_FOLDER_OBJS) $(LIBS)
 
 KMERS_MATRIX_DISTANCE_OBJS = src/kmers-matrix-distance.o src/fasta_parser.o
 kmers-matrix-distance: $(KMERS_MATRIX_DISTANCE_OBJS)

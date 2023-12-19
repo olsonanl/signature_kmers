@@ -6,15 +6,22 @@
 #include <string>
 #include <set>
 #include <iostream>
+#include <cmath>
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
+
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+#include <boost/accumulators/statistics/median.hpp>
+#include <boost/accumulators/statistics/variance.hpp>
 
 #include "seed_utils.h"
 #include "fasta_parser.h"
 
 namespace fs = boost::filesystem;
-
+namespace acc = boost::accumulators;
 /*!
  * Manage the ID to function mapping.
  *
@@ -220,6 +227,8 @@ public:
 			// std::cerr << "Keeping function " << func << "\n";
 			good_functions_.insert(func);
 		    }
+		    // Update the accumulators managing protein length stats for this function
+		    function_accumulators_[func](static_cast<double>(seq.length()));
 		}
 			
 		return;
@@ -362,6 +371,12 @@ public:
 	    return it->second;
     }
 
+    /*! @brief Write the function index file
+
+      This file maps a numeric index to the function name. We also write
+      the protein length statistics for the function:
+         count, mean, median, variance, stddev
+    */
     void write_function_index(const fs::path &dir) {
 	fs::ofstream of(dir / "function.index");
 
@@ -370,7 +385,19 @@ public:
 	    by_index.insert(std::make_pair(ent.second, ent.first));
 	for (auto ent: by_index)
 	{
-	    of << ent.first << "\t" << ent.second << "\n";
+	    accum &a = function_accumulators_[ent.second];
+	    double mean = acc::mean(a);
+	    double median = acc::median(a);
+	    double var = acc::variance(a);
+	    double dev = std::sqrt(var);
+	    int count = static_cast<int>(acc::count(a));
+	    of << ent.first << "\t" << ent.second << "\t"
+	       << count << "\t"
+	       << mean << "\t"
+	       << median << "\t"
+	       << var << "\t"
+	       << dev
+	       << "\n";
 	}
     }
 
@@ -408,7 +435,24 @@ private:
 
     std::map<std::string, std::string> original_assignment_stripped_;
     std::map<std::string, std::string> original_assignment_;
-};
 
+    /* Keep track of per-function statistics. We keep accumulator here
+       because sequences are loaded via multiple calls into this object.
+       function_statistics_ maintains the computed values after all loads
+       are complete.
+     */
+    struct PerFunctionStatistics
+    {
+	int count;
+	double mean;
+	double median;
+	double standard_deviation;
+	PerFunctionStatistics(int c, double mn, double md, double dev)
+	    : count(c), mean(mn), median(md), standard_deviation(dev) {}
+    };
+    std::map<std::string, PerFunctionStatistics> function_statistics_;
+    using accum = acc::accumulator_set<float, acc::stats<acc::tag::mean, acc::tag::median, acc::tag::variance, acc::tag::count>>;
+    std::map<std::string, accum> function_accumulators_;
+};
 
 #endif

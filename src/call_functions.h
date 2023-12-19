@@ -16,6 +16,10 @@
 #include <boost/accumulators/statistics/median.hpp>
 #include <boost/accumulators/statistics/variance.hpp>
 
+#include <tbb/concurrent_vector.h>
+#include <tbb/concurrent_map.h>
+#include "seq_id_map.h"
+
 class KmerCall
 {
 public:
@@ -68,6 +72,11 @@ public:
     template <typename HitCB, typename CallCB>
     void process_fasta_stream(std::istream &istr, HitCB &hit_cb, CallCB &call_cb);
 
+    template <typename HitCB, typename CallCB>
+    void process_fasta_stream_parallel(std::istream &istr, HitCB &hit_cb, CallCB &call_cb
+				       ,SeqIdMap &idmap
+	);
+
     template <typename HitCB>
     void process_aa_seq(const std::string &id, const std::string &seq,
 			std::shared_ptr<std::vector<KmerCall>> calls,
@@ -108,6 +117,9 @@ public:
 
 #endif
 
+    void ignore_hypothetical(bool x) { ignore_hypothetical_ = x; }
+
+
 private:
 
     KmerDb &kmer_db_;
@@ -115,6 +127,7 @@ private:
     bool order_constraint_;
     int min_hits_;
     int max_gap_;
+    bool ignore_hypothetical_;
 
     std::vector<std::string> function_index_;
     std::string undefined_function_;

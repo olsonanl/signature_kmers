@@ -36,6 +36,7 @@ struct program_parameters
     fs::path sequences_dir;
     fs::path calls_file;
     fs::path uncalled_ids_file;
+    bool ignore_hypo = false;
     int n_threads = 1;
 };
 
@@ -52,6 +53,7 @@ void process_options(int argc, char **argv, program_parameters &params)
 	("calls-file", po::value<fs::path>(&params.calls_file), "Output calls file")
 	("uncalled-ids-file", po::value<fs::path>(&params.uncalled_ids_file), "Output uncalled IDs file")
 	("parallel,j", po::value<int>(&params.n_threads), "Number of threads")
+	("ignore-hypo", po::bool_switch(&params.ignore_hypo), "Ignore hypothetical protein kmers when making calls")
 	("help,h", "show this help message");
 
     po::positional_options_description pos;
@@ -94,6 +96,7 @@ int main(int argc, char **argv)
     }
     kdb.open();
     FunctionCaller<DbType> caller(kdb, params.data_dir / "function.index");
+    caller.ignore_hypothetical(params.ignore_hypo);
 
     auto hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
     };

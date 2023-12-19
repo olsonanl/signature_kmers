@@ -39,6 +39,7 @@ struct program_parameters
     fs::path output_file;
     std::vector<std::string> fasta_dirs;
     bool debug_hits = false;
+    bool ignore_hypo = false;
     int n_threads = 1;
 };
 
@@ -54,6 +55,7 @@ void process_options(int argc, char **argv, program_parameters &params)
 	("output-files,o", po::value<fs::path>(&params.output_file), "Output file")
 //	("fasta-dir,F", po::value<std::vector<std::string>>(&params.fasta_dirs)->multitoken(), "Directory of fasta files of protein data")
 	("n-threads,j", po::value<int>(&params.n_threads), "Number of threads")
+	("ignore-hypo", po::bool_switch(&params.ignore_hypo), "Ignore hypothetical protein kmers when making calls")
 	("debug-hits", po::bool_switch(&params.debug_hits), "Debug kmer hits")
 	("help,h", "show this help message");
 
@@ -102,10 +104,26 @@ int main(int argc, char **argv)
     }
     nudb.open();
     FunctionCaller<DbType> caller(nudb, params.data_dir / "function.index");
+    caller.ignore_hypothetical(params.ignore_hypo);
 
+    using cbf = std::function<void(const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd)>;
+
+    cbf hit_cb;
+    if (params.debug_hits)
+    {
+	hit_cb = [&caller](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+	    std::cout << kmer << "\t" << offset << "\t" << caller.function_at_index(kd.function_index) << "\t" << kd.median << "\t" << kd.mean << "\t" << kd.var << "\t" << sqrt(kd.var) << "\t" << "\n";
+	};
+    }
+    else
+    {
+	hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {};
+    }
+    
+/*
     auto hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
     };
-/*    auto hit_cb = [&caller, &params](const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+    auto hit_cb = [&caller, &params](const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
 	if (params.debug_hits)
 	{
 	    std::cout << kmer << "\t" << caller.function_at_index(kd.function_index) << "\t" << kd.median << "\t" << kd.mean << "\t" << kd.var << "\t" << sqrt(kd.var) << "\t" << "\n";
