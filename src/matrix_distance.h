@@ -2,6 +2,7 @@
 #define _matrix_distance_h
 
 #include "fasta_parser.h"
+#include "seq_id_map.h"
 
 #include <tbb/global_control.h>
 #include <tbb/blocked_range2d.h>
@@ -31,39 +32,48 @@ class MatrixDistance
 {
 public:
 
-
-MatrixDistance(Caller &caller, const fs::path &in_file, const fs::path &out_file, bool verbose) 
+    MatrixDistance(Caller &caller, const fs::path &in_file, const fs::path &out_file, bool verbose) 
     : caller_(caller), in_file_(in_file), out_file_(out_file), verbose_(verbose) {
 	
     };
     
-    struct Counter
-    {
-	struct value_type { template<typename T> value_type(const T&) { } };
-	void push_back(const value_type&) { ++count; }
-	size_t count = 0;
-    };
-
     void compute()
     {
-	using hit_set = tbb::concurrent_set<Kmer<8>>;
-	using id_hit_map = tbb::concurrent_map<std::string, hit_set>;
+	/*
+	 * kmer_hit_map maps from a kmer to the set of IDs containing that kmer
+	 */
+	tbb::concurrent_unordered_map<Kmer<8>, tbb::concurrent_unordered_set<int>, tbb_hash<8>> kmer_hit_map;
 
-	id_hit_map id_hit_sets;
+	auto hit_cb = [&kmer_hit_map, this](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+	    // std::cerr << id << " " << seqlen << " " << kd << "\n";
+
+
+	    /*
+	     * Discard any hit that is outside either 2 standard deviations from the mean
+	     * (If we have a variance reported) or outside 20% of the reference sequence length.
+	     */
+
+	    int idx = idmap_.lookup_id(id);
 	
-	auto hit_cb = [&id_hit_sets](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
-	    auto iter = id_hit_sets.find(id);
-	    if (iter == id_hit_sets.end())
+	    double cutoff_b, cutoff_t;
+	    double mean = static_cast<double>(kd.mean);
+	    double stddev;
+	    if (kd.var == 0)
 	    {
-		auto n = id_hit_sets.emplace(std::make_pair(id, hit_set()));
-		n.first->second.insert(kmer);
+		stddev = seqlen * 0.1;
 	    }
 	    else
 	    {
-		iter->second.insert(kmer);
+		stddev = std::sqrt(static_cast<double>(kd.var));
 	    }
-	};
+	    cutoff_b = mean - stddev * 2.0;
+	    cutoff_t = mean + stddev * 2.0;
 
+	    if (seqlen < cutoff_b || seqlen > cutoff_t)
+		return;
+
+	    kmer_hit_map[kmer].insert(idx);
+	};
 
 	tbb::concurrent_unordered_map<std::string, size_t> prot_sizes;
 	auto call_cb = [&prot_sizes](const std::string &id, const std::string &func, FunctionIndex func_index, float score, size_t prot_len) {
@@ -72,68 +82,61 @@ MatrixDistance(Caller &caller, const fs::path &in_file, const fs::path &out_file
 
 	fs::ifstream ifstr(in_file_);
 	    
-	caller_.process_fasta_stream(ifstr, hit_cb, call_cb);
+	caller_.ignore_hypothetical(true);
+	caller_.process_fasta_stream_parallel(ifstr, hit_cb, call_cb, idmap_);
 	    
 	ifstr.close();
 
-	std::cerr << in_file_ << "Sequence count: " << id_hit_sets.size() << "\n";
 	std::cerr << in_file_<< " Start all to all comparison\n";
 
-	auto compare = id_hit_sets.key_comp();
+	std::cerr << "kmer_hit_map size " << kmer_hit_map.size() << "\n";
 
-	tbb::concurrent_vector<std::string> keys;
-	for (auto ent: id_hit_sets)
-	{
-	    keys.push_back(ent.first);
-	}
+	/*
+	 * seq_dist is a map from id1 to id2 containing the count between the pair.
+	 * We only add an entry when id1 < id2.
+	 */
 
-	using shared_buf_t = std::shared_ptr<boost::asio::streambuf>;
-
-	tbb::concurrent_vector<shared_buf_t> output_bufs;
-	tbb::parallel_for(tbb::blocked_range2d<int,int>(0, keys.size(), 0, keys.size()),
-			  [&id_hit_sets, &prot_sizes, &keys, &output_bufs](auto r)
-			  {
-			      shared_buf_t buf = std::make_shared<boost::asio::streambuf>();
-			      std::ostream bufstr(buf.get());
-			      
-			      for (size_t i=r.rows().begin(); i!=r.rows().end(); ++i)
+	tbb::concurrent_unordered_map<int, tbb::concurrent_unordered_map<int, int>> seq_dist;
+    
+	tbb::parallel_for(kmer_hit_map.range(), 
+			  [&seq_dist](auto r) {
+			      for (auto ent: r)
 			      {
-				  auto &id1 = keys[i];
-				  auto &set1 = id_hit_sets[id1];
-				  size_t len1 = prot_sizes[id1];
-				  
-				  for ( size_t j=r.cols().begin(); j!=r.cols().end(); ++j )
+				  const auto &kmer = ent.first;
+				  tbb::concurrent_unordered_set<int> &s = ent.second;
+
+				  for (auto &id1: s)
 				  {
-				      if (i <= j)
-					  return;
-				      auto &id2 = keys[j];
-				      auto &set2 = id_hit_sets[id2];
-				      size_t len2 = prot_sizes[id2];
-
-				      Counter c;
-
-				      std::set_intersection(set1.begin(), set1.end(), set2.begin(), set2.end(),
-							    std::back_inserter(c));
-
-				      if (c.count > 0)
+				      for (auto &id2: s)
 				      {
-					  float score = static_cast<float>(c.count) / static_cast<float>(len1 + len2);
-					  bufstr << id1 << "\t" << id2 << "\t" << c.count << "\t" << score << "\n";
+					  if (id1 < id2)
+					  {
+					      seq_dist[id1][id2]++;
+					  }
 				      }
 				  }
 			      }
-			      if (buf->size() > 0)
-			      {
-				  output_bufs.push_back(buf);
-			      }
 			  });
-					  
+
 	std::cerr << in_file_ << " all to all done\n";
 	fs::ofstream ofstr(out_file_);
-	for (auto b: output_bufs)
+	for (auto &ent1: seq_dist)
 	{
-	    ofstr << b;
+	    auto &id1 = ent1.first;
+	    auto &l1 = ent1.second;
+	    const std::string &seq1 = idmap_.lookup_index(id1);
+	    size_t len1 = prot_sizes[seq1];
+	    for (auto ent2: l1)
+	    {
+		auto &id2 = ent2.first;
+		const std::string &seq2 = idmap_.lookup_index(id2);
+		size_t len2 = prot_sizes[seq2];
+		int count = ent2.second;
+		float score = static_cast<float>(count) / static_cast<float>(len1 + len2);
+		ofstr << seq1 << "\t" << seq2 << "\t" << count << "\t" << score << "\n";
+	    }
 	}
+
     };
 
 
@@ -142,6 +145,7 @@ private:
     const fs::path &in_file_;
     const fs::path &out_file_;
     bool verbose_ = false;
+    SeqIdMap idmap_;
 };
 
 #endif // _matrix_distance_h
