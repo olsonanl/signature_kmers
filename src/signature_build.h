@@ -67,7 +67,7 @@ public:
     void load_fasta(const std::vector<fs::path> &fasta_files, bool keep_functions,
 		    const std::set<std::string> &deleted_fids);
 
-    void process_kept_functions(int min_reps_required, const fs::path &function_index_file);
+    void process_kept_functions(int min_reps_required, const fs::path &function_index_file, std::set<std::string> &ignored_functions);
 
     void extract_kmers(const std::set<std::string> &deleted_fids);
     void process_kmers();

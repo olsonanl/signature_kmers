@@ -23,13 +23,14 @@ static bool process_command_line_options(int argc, char *argv[],
 					 std::vector<std::string> &good_functions,
 					 std::vector<std::string> &good_roles,
 					 fs::path &deleted_fids_file,
+					 fs::path &ignored_functions_file,
 					 int &min_reps_required,
 					 fs::path &kmer_data_dir,
 					 fs::path &final_kmers,
 					 std::string &nudb_file,
 					 fs::path &perfect_hash,
 					 fs::path &perfect_hash_data,
-				  int &n_threads)
+					 int &n_threads)
 {
     std::ostringstream x;
     x << "Usage: " << argv[0] << " [options]\nAllowed options";
@@ -50,6 +51,7 @@ static bool process_command_line_options(int argc, char *argv[],
 	("good-functions", po::value<std::vector<std::string>>(&good_function_files), "File containing list of functions to be kept")
 	("good-roles", po::value<std::vector<std::string>>(&good_role_files), "File containing list of roles to be kept")
 	("deleted-features-file", po::value<fs::path>(&deleted_fids_file), "File containing list of deleted feature IDs")
+	("ignored-functions-file", po::value<fs::path>(&ignored_functions_file), "File containing list of functions for which we do not create signatures")
 	("kmer-data-dir", po::value<fs::path>(&kmer_data_dir), "Write kmer data files to this directory")
 	("nudb-file", po::value<std::string>(&nudb_file), "Write saved kmers to this NuDB file base. Should be on a SSD drive.")
 	("min-reps-required", po::value<int>(&min_reps_required), "Minimum number of genomes a function must be seen in to be considered for kmers")
@@ -133,6 +135,7 @@ int main(int argc, char *argv[])
     fs::path final_kmers;
     fs::path deleted_fids_file;
     fs::path kmer_data_dir;
+    fs::path ignored_functions_file;
 
     int min_reps_required = 3;
     
@@ -149,6 +152,7 @@ int main(int argc, char *argv[])
 				      good_functions,
 				      good_roles,
 				      deleted_fids_file,
+				      ignored_functions_file,
 				      min_reps_required,
 				      kmer_data_dir,
 				      final_kmers,
@@ -167,6 +171,7 @@ int main(int argc, char *argv[])
     builder.load_function_data(good_functions, good_roles, function_definitions);
 
     std::set<std::string> deleted_fids = load_set_from_file(deleted_fids_file);
+    std::set<std::string> ignored_functions = load_set_from_file(ignored_functions_file);
 
     ensure_directory(kmer_data_dir);
 
@@ -174,7 +179,7 @@ int main(int argc, char *argv[])
     builder.load_fasta(fasta_data, false, deleted_fids);
     builder.load_fasta(fasta_data_kept_functions, true, deleted_fids);
 
-    builder.process_kept_functions(min_reps_required, kmer_data_dir);
+    builder.process_kept_functions(min_reps_required, kmer_data_dir, ignored_functions);
 
     if (!kmer_data_dir.empty())
     {

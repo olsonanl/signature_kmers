@@ -66,7 +66,8 @@ public:
 		   int min_hits = 5, int max_gap = 200);
 
     void read_function_index(const fs::path &function_index_file);
-
+    const std::vector<std::string> &function_index() { return function_index_;}
+    
     /* Fasta processing methods */
 
     template <typename HitCB, typename CallCB>

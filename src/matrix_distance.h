@@ -33,7 +33,12 @@ class MatrixDistance
 public:
 
     MatrixDistance(Caller &caller, const fs::path &in_file, const fs::path &out_file, bool verbose) 
-    : caller_(caller), in_file_(in_file), out_file_(out_file), verbose_(verbose) {
+	: caller_(caller), in_files_{in_file}, out_file_(out_file), verbose_(verbose) {
+	
+    };
+    
+    MatrixDistance(Caller &caller, const std::vector<fs::path> &in_files, const fs::path &out_file, bool verbose) 
+	: caller_(caller), in_files_(in_files), out_file_(out_file), verbose_(verbose) {
 	
     };
     
@@ -80,16 +85,40 @@ public:
 	    prot_sizes.insert(std::make_pair(id, prot_len));
 	};
 
-	fs::ifstream ifstr(in_file_);
-	    
 	caller_.ignore_hypothetical(true);
-	caller_.process_fasta_stream_parallel(ifstr, hit_cb, call_cb, idmap_);
+	std::string label;
+	for (auto in_file: in_files_)
+	{
+	    if (!fs::is_regular_file(in_file) || fs::is_empty(in_file))
+		continue;
 	    
-	ifstr.close();
+	    fs::ifstream ifstr(in_file);
+	    caller_.process_fasta_stream_parallel(ifstr, hit_cb, call_cb, idmap_);
+	    ifstr.close();
+	    if (label == "")
+		label = in_file.string();
+	    else
+	    {
+		label += ",";
+		label += in_file.string();
+	    }
+	}
 
-	std::cerr << in_file_<< " Start all to all comparison\n";
+	if (verbose_)
+	{
+	    std::cerr << label << " Start all to all comparison\n";
+	    std::cerr << "kmer_hit_map size " << kmer_hit_map.size() << "\n";
+	}
 
-	std::cerr << "kmer_hit_map size " << kmer_hit_map.size() << "\n";
+	/*
+	 * If we encountered no files to process, just return.
+	 */
+	if (label == "")
+	{
+	    if (verbose_)
+		std::cerr << "Skip compute " << in_files_[0] << "\n";
+	    return;
+	}
 
 	/*
 	 * seq_dist is a map from id1 to id2 containing the count between the pair.
@@ -118,7 +147,8 @@ public:
 			      }
 			  });
 
-	std::cerr << in_file_ << " all to all done\n";
+	if (verbose_)
+	    std::cerr << label << " all to all done\n";
 	fs::ofstream ofstr(out_file_);
 	for (auto &ent1: seq_dist)
 	{
@@ -142,7 +172,7 @@ public:
 
 private:
     Caller &caller_;
-    const fs::path &in_file_;
+    const std::vector<fs::path> &in_files_;
     const fs::path &out_file_;
     bool verbose_ = false;
     SeqIdMap idmap_;

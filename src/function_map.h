@@ -254,7 +254,7 @@ public:
      * which functions are to have signatures created.
      * @param min_reps_required Function must occur in this many distinct genomes to be kept
      */
-    void process_kept_functions(int min_reps_required) {
+    void process_kept_functions(int min_reps_required, const std::set<std::string> &ignored_functions) {
 	std::set<std::string> kept;
 	for (auto entry: function_genome_map_)
 	{
@@ -308,6 +308,15 @@ public:
 	}
 	// Ensure we have an ID for hypothetical protein
 	kept.insert("hypothetical protein");
+
+	/*
+	 * Remove functions that we are going to ignore.
+	 */
+	for (auto fn: ignored_functions)
+	{
+	    std::cerr << "Ignore '" << fn << "'\n";
+	    kept.erase(fn);
+	}
 
 	/*
 	 * Assign sequential function IDs.

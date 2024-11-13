@@ -50,7 +50,11 @@ public:
     }
 
     void open() {
-	map_backing_data();
+	map_backing_data(false);
+    }
+
+    void open_for_writing() {
+	map_backing_data(true);
     }
 
     /*! Create backing data store for the given hash size.
@@ -64,9 +68,10 @@ public:
 	fbuf.sputc(0);
     }
 
-    void map_backing_data() {
-	mapping_ = ip::file_mapping(dat_path_.native().c_str(), ip::read_write);
-	mapped_region_ = ip::mapped_region(mapping_, ip::read_write);
+    void map_backing_data(bool writable) {
+	auto write_flag = writable ? ip::read_write : ip::read_only;
+	mapping_ = ip::file_mapping(dat_path_.native().c_str(), write_flag);
+	mapped_region_ = ip::mapped_region(mapping_, write_flag);
 	data_ = (StoredData *) mapped_region_.get_address();
 
 	std::cerr << "Invoke madvise size=" << fs::file_size(dat_path_) << "\n";

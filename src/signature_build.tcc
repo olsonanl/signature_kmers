@@ -35,9 +35,9 @@ void SignatureBuilder<K>::load_fasta(const std::vector<fs::path> &fasta_files,
 }
 
 template <int K>
-void SignatureBuilder<K>::process_kept_functions(int min_reps_required, const fs::path &output_dir)
+void SignatureBuilder<K>::process_kept_functions(int min_reps_required, const fs::path &output_dir, std::set<std::string> &ignored_functions)
 {
-    fm_.process_kept_functions(min_reps_required);
+    fm_.process_kept_functions(min_reps_required, ignored_functions);
     if (!output_dir.empty())
     {
 	fm_.write_function_index(output_dir);
