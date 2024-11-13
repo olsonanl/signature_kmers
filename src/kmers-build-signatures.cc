@@ -6,6 +6,7 @@
 #include "perfect_hash.h"
 #include "cmph_kmer.h"
 
+
 #include <boost/program_options.hpp>
 
 #include <tbb/global_control.h>
@@ -166,12 +167,12 @@ int main(int argc, char *argv[])
 
     tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, n_threads);
 
+    std::set<std::string> deleted_fids = load_set_from_file(deleted_fids_file);
+    std::set<std::string> ignored_functions = load_set_from_file(ignored_functions_file);
+
     SignatureBuilder<K> builder(n_threads, MaxSequencesPerFile);
 
     builder.load_function_data(good_functions, good_roles, function_definitions);
-
-    std::set<std::string> deleted_fids = load_set_from_file(deleted_fids_file);
-    std::set<std::string> ignored_functions = load_set_from_file(ignored_functions_file);
 
     ensure_directory(kmer_data_dir);
 

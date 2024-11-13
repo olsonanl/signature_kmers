@@ -45,7 +45,7 @@ DEBUG = -g
 INC = $(BOOST_INC) $(TBB_FLAGS) $(NUDB_INCLUDE) $(CMPH_INCLUDE)
 
 
-CXXFLAGS = $(PROFILE) $(DEBUG) $(OPT) $(INC)
+CXXFLAGS = $(PROFILE) $(DEBUG) $(OPT) $(INC) -std=c++20
 LDFLAGS = -Wl,-rpath,$(BOOST)/lib -Wl,-rpath,$(CMPH)/lib $(PROFILE)
 
 LIBS = $(BOOST_LIBS) $(TBB_LIBS) $(CMPH_LIB)
@@ -126,3 +126,4 @@ $(BIN_DIR)/%: service-scripts/%.py $(TOP_DIR)/user-env.sh
 	$(WRAP_PYTHON_SCRIPT) '$$KB_TOP/modules/$(CURRENT_DIR)/$<' $@
 
 include $(TOP_DIR)/tools/Makefile.common.rules
+include src/*.d

@@ -1,6 +1,11 @@
 #ifndef _path_utils
 #define _path_utils
 
+#include <cstring>
+#include <cerrno>
+#include <stdexcept>
+#include <boost/format.hpp>
+
 /*!
   @file path_utils.h
   @brief Some useful utilities for managing paths for command line processing.
@@ -73,6 +78,9 @@ std::set<std::string> load_set_from_file(const fs::path &file)
     if (!file.empty())
     {
 	fs::ifstream ifstr(file);
+	if (!ifstr.is_open())
+	    throw std::runtime_error(str(boost::format("error opening %1%: %2%") % file % strerror(errno)));
+
 	std::string line;
 	while (std::getline(ifstr, line, '\n'))
 	{
