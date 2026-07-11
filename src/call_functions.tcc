@@ -1,7 +1,11 @@
 
-#ifndef DEBUG_SCORING
+//#ifndef DEBUG_SCORING
 #define DEBUG_SCORING 0
-#endif
+//#endif
+
+namespace fs = boost::filesystem;
+
+#define DEBUG_CALLING 0
 
 template <class KmerDb>
 class HitSet
@@ -45,45 +49,60 @@ public:
 	    {
 		last_hit = h_iter;
 		fI_count++;
-		protein_lengths.push_back(static_cast<float>(h_iter->kdata.mean));
+		if (h_iter->kdata.median > 0)
+		    protein_lengths.push_back(static_cast<float>(h_iter->kdata.median));
 	    }
 	}
-	auto mean_length = boost::math::statistics::mean(protein_lengths);
-	auto median_length = boost::math::statistics::median(protein_lengths);
-	auto mad_length = boost::math::statistics::median_absolute_deviation(protein_lengths);
-	if (mad_length == 0)
-	    mad_length = 30;
-	auto cutoff_b = mean_length - 2.0 * mad_length;
-	auto cutoff_t = mean_length + 2.0 * mad_length;
-	// std::cout << "hit stats: " << mean_length << " " << median_length << " " << mad_length << "\n";
-	// for (auto x: protein_lengths) { std::cout << x << " " ; }; std::cout << "\n";
-	if (fI_count >= min_hits_)
+	bool handle_cutoff = false;
+	float cutoff_b, cutoff_t;
+	float median_length = 0;
+	float mad_length = 0.0;
+	if (protein_lengths.size() > 0)
 	{
-	    if (seqlen < cutoff_b || seqlen > cutoff_t)
+	    auto mean_length = boost::math::statistics::mean(protein_lengths);
+	    median_length = boost::math::statistics::median(protein_lengths);
+	    mad_length = boost::math::statistics::median_absolute_deviation(protein_lengths);
+	    if (mad_length == 0)
 	    {
-		/*
-		std::cerr << "Skip hit" << "\t"
-			  << id << "\t"
-			  << seqlen << "\t"
-			  << cutoff_b << "\t"
-			  << cutoff_t << "\t"
-			  << current_fI << "\n";
-		*/
+		cutoff_b = median_length * 0.8;
+		cutoff_t = median_length * 1.2;
 	    }
 	    else
 	    {
-		if (calls)
-		{
-		    calls->push_back({
-			    static_cast<unsigned int>(hits_[0].pos),
-			    static_cast<unsigned int>(last_hit->pos + (KmerDb::KmerSize - 1)),
-			    fI_count,
-			    current_fI,
-			    static_cast<unsigned int>(median_length),
-			    mad_length });
-		}
+		cutoff_b = median_length - 2.0 * mad_length;
+		cutoff_t = median_length + 2.0 * mad_length;
+	    }
+	    handle_cutoff = true;
+
+#if DEBUG_CALLING
+	    std::cout << "hit stats: " << mean_length << " " << median_length << " " << mad_length << "\n";
+	    for (auto x: protein_lengths) { std::cout << x << " " ; }; std::cout << "\n";
+#endif
+	}
+	if (fI_count >= min_hits_)
+	{
+	    bool is_short = handle_cutoff && (seqlen < cutoff_b);
+	    bool is_long = handle_cutoff && (seqlen > cutoff_t);
+	    
+	    if (calls)
+	    {
+		calls->push_back({
+			static_cast<unsigned int>(hits_[0].pos),
+			static_cast<unsigned int>(last_hit->pos + (KmerDb::KmerSize - 1)),
+			fI_count,
+			current_fI,
+			static_cast<unsigned int>(median_length),
+			mad_length,
+			is_short,
+			is_long});
 	    }
 	}
+#if DEBUG_CALLING
+	else
+	{
+	    std::cerr << "skipping, " << fI_count << " < " << min_hits_ << "\n";
+	}
+#endif
 	
 	auto end = hits_.rbegin();
 	
@@ -109,13 +128,12 @@ public:
 
 
 template <class KmerDb>
-FunctionCaller<KmerDb>::FunctionCaller(KmerDb &kmer_db, const fs::path &function_index_file,
+FunctionCaller<KmerDb>::FunctionCaller(const KmerDb &kmer_db, const fs::path &function_index_file,
 		   int min_hits, int max_gap) :
     kmer_db_(kmer_db),
     order_constraint_(false),
     min_hits_(min_hits),
-    max_gap_(max_gap),
-    ignore_hypothetical_(false)
+    max_gap_(max_gap)
 {
     read_function_index(function_index_file);
 }
@@ -158,7 +176,7 @@ template <class KmerDb>
 template <typename HitCB, typename CallCB>
 void FunctionCaller<KmerDb>::process_fasta_stream_parallel(std::istream &istr, HitCB &hit_cb, CallCB &call_cb
 							   ,SeqIdMap &idmap
-    )
+    ) const
 {
 
     try {
@@ -216,7 +234,7 @@ void FunctionCaller<KmerDb>::process_fasta_stream_parallel(std::istream &istr, H
 
 template <class KmerDb>
 template <typename HitCB, typename CallCB>
-void FunctionCaller<KmerDb>::process_fasta_stream(std::istream &istr, HitCB &hit_cb, CallCB &call_cb)
+void FunctionCaller<KmerDb>::process_fasta_stream(std::istream &istr, HitCB &hit_cb, CallCB &call_cb) const
 {
 
     try {
@@ -260,42 +278,40 @@ template <class KmerDb>
 template <typename HitCB>
 void FunctionCaller<KmerDb>::process_aa_seq(const std::string &idstr, const std::string &seqstr,
 					    std::shared_ptr<std::vector<KmerCall>> calls,
-					    HitCB hit_cb)
+					    HitCB hit_cb, const std::map<std::string, std::string>& parameters) const
 {
     HitSet<KmerDb> hits(seqstr.length(), min_hits_);
     FunctionIndex current_fI = UndefinedFunction;
     double seqlen = static_cast<double>(seqstr.length());
 
-    auto it = std::find(function_index_.begin(), function_index_.end(), "hypothetical protein");
-    if (it == function_index_.end())
-    {
-	std::cerr << "Cannot find hypothetical protein index\n";
-	exit(1);
-    }
-    std::ptrdiff_t hypo_pos = it - function_index_.begin();
-    for_each_kmer<KmerDb::KmerSize>(seqstr, [this, &idstr, &calls, &hit_cb, &hits, &current_fI, seqlen, hypo_pos]
+    for_each_kmer<KmerDb::KmerSize>(seqstr, [this, &idstr, &calls, &hit_cb, &hits, &current_fI, seqlen]
 				    (const std::array<char, KmerDb::KmerSize> &kmer, size_t offset) {
-	// std::cerr << "process " << kmer << "\n";
+#if DEBUG_CALLING
+	std::cerr << "process " << kmer << "\n";
+#endif
 	
 	int ec;
-	kmer_db_.fetch(kmer, [this, hit_cb, offset, &idstr, &hits, &calls, &current_fI, &kmer, seqlen, hypo_pos]
-		      (const StoredKmerData &kdata) {
+	kmer_db_.fetch_with_id(kmer, [this, hit_cb, offset, &idstr, &hits, &calls, &current_fI, &kmer, seqlen]
+		      (KmerDb::encoded_key_type kidx, const StoredKmerData &kdata) {
 
+	    hit_cb(idstr, kmer, offset, seqlen, kdata, kidx);
 
-	    if (ignore_hypothetical_ && kdata.function_index == hypo_pos)
+	    #if DEBUG_CALLING
+	    std::cerr << kmer << "\t" << offset << "\t" << kdata.function_index <<"\n";
+	    if (!hits.empty())
 	    {
-		// std::cerr << "Skipping hypo " << kmer << "\t" << offset << "\t" << kdata.function_index << "\n";
-		return;
+		std::cerr << "   last= " << hits.last_hit().pos << " max_gap_=" << max_gap_ << " offset=" << offset << "\n";
 	    }
-		
-	    hit_cb(idstr, kmer, offset, seqlen, kdata);
-
-	    // std::cerr << kmer << "\t" << offset << "\t" << kdata->function_index << "\n";
+#endif
 	    // Is this hit beyond max_gap_ of the last one?
 	    if (!hits.empty() && hits.last_hit().pos + max_gap_ < offset)
 	    {
 		if (hits.count() >= min_hits_)
+		{
+		    // std::cerr << "Process " << hits.count() << " hits\n";
+		    
 		    hits.process(idstr, seqlen, current_fI, calls);
+		}
 		else
 		    hits.clear();
 	    }
@@ -319,10 +335,16 @@ void FunctionCaller<KmerDb>::process_aa_seq(const std::string &idstr, const std:
 		 */
 		if (hits.count() > 1 && current_fI != kdata.function_index)
 		{
+		    // std::cerr << "proc check " << current_fI  << " " << kdata.function_index << "\n";
 		    auto end = hits.rbegin();
 		    if (end[1].kdata.function_index == end[0].kdata.function_index)
 		    {
+			// std::cerr << "Process2 " << hits.count() << " hits\n";
 			hits.process(idstr, seqlen, current_fI, calls);
+		    }
+		    else
+		    {
+			// std::cerr << "No2 " << end[1].kdata.function_index  << " " << end[0].kdata.function_index << "\n";
 		    }
 		}
 	    }
@@ -330,7 +352,9 @@ void FunctionCaller<KmerDb>::process_aa_seq(const std::string &idstr, const std:
 	}, ec);
 	if (ec)
 	{
-	    // std::cerr << "Error " << ec << " returned from caller\n";
+	    #if DEBUG_CALLINGXX
+	    std::cerr << "Error " << ec << " returned from caller\n";
+	    #endif
 	}
     });
     if (hits.count() >= min_hits_)
@@ -345,7 +369,7 @@ void FunctionCaller<KmerDb>::process_aa_seq(const std::string &idstr, const std:
  * km_process_hits_to_regions | km_pick_best_hit_in_peg
  */
 template <class KmerDb>
-void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<KmerCall> &calls, FunctionIndex &function_index, std::string &function, float &score, float &score_offset)
+void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<KmerCall> &calls, FunctionIndex &function_index, std::string &function, float &score, float &score_offset) const
 {
     function_index = UndefinedFunction;
     function = "";
@@ -619,6 +643,40 @@ void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<K
 	function_index = best.first;
 	function = function_at_index(function_index);
 	score = (float) best.second;
+
+
+	// Need rescan the merged list and determine if our hits were too short or long.
+
+	int short_count = 0;
+	int long_count = 0;
+	for (auto c: merged)
+	{
+	    if (c.function_index == function_index)
+	    {
+		if (c.is_short)
+		    short_count++;
+		if (c.is_long)
+		    long_count++;
+	    }
+	}
+	if (short_count || long_count)
+	{
+	    if (offlength_call_mode_ == OffLengthNoCall)
+	    {
+		function_index = UndefinedFunction;
+		function = "";
+		score = 0.0;
+	    }
+	    else if (offlength_call_mode_ == OffLengthMark)
+	    {
+		std::ostringstream msg;
+		if (short_count)
+		    msg << " kmer_short=" << short_count;
+		if (long_count)
+		    msg << " kmer_long=" << long_count;
+		function = function + " #" + msg.str();
+	    }
+	}
     }
     else
     {
@@ -657,4 +715,27 @@ void FunctionCaller<KmerDb>::find_best_call(const std::string &id, std::vector<K
 #endif
     }
 }
+
+template <class KmerDb>
+std::string FunctionCaller<KmerDb>::format_call(const KmerCall &c) const
+ {
+     std::ostringstream oss;
+     oss << "CALL\t" << c.start << "\t" << c.end << "\t" << c.count;
+     oss << "\t" << c.function_index << "\t" << function_at_index(c.function_index);
+     oss << "\t" << 0.0 << "\n";
+
+     return oss.str();
+ }
+
+template <class KmerDb>
+std::string FunctionCaller<KmerDb>::format_hit(const FunctionCaller<KmerDb>::HitInSequence &h) const
+ {
+     std::ostringstream oss;
+
+     oss << "HIT\t" << h.offset << "\t" << h.kmer << "\t" << h.kmer_data.avg_from_end << "\t" << function_at_index(h.kmer_data.function_index) << "\t" << 0.0 << "\t" << -1 << "\t" << h.kidx << "\n";
+    
+    return oss.str();
+}
+
+
 

@@ -12,6 +12,7 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_map.h>
 #include <tbb/concurrent_set.h>
+#include <tbb/parallel_for.h>
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -32,34 +33,35 @@ class MatrixDistance
 {
 public:
 
-    MatrixDistance(Caller &caller, const fs::path &in_file, const fs::path &out_file, bool verbose) 
-	: caller_(caller), in_files_{in_file}, out_file_(out_file), verbose_(verbose) {
+    MatrixDistance(Caller &caller, const fs::path in_file, const fs::path out_file, bool verbose,
+		   int min_kmers_in_common = 1, int min_protein_len = 0) 
+	: caller_(caller), in_files_{in_file}, out_file_(out_file),
+	  verbose_(verbose), min_kmers_in_common_(min_kmers_in_common), min_protein_len_(min_protein_len) {
 	
     };
     
-    MatrixDistance(Caller &caller, const std::vector<fs::path> &in_files, const fs::path &out_file, bool verbose) 
-	: caller_(caller), in_files_(in_files), out_file_(out_file), verbose_(verbose) {
+    MatrixDistance(Caller &caller, const std::vector<fs::path> in_files, const fs::path out_file, bool verbose,
+		   int min_kmers_in_common = 1, int min_protein_len = 0) 
+	: caller_(caller), in_files_(in_files), out_file_(out_file), verbose_(verbose),
+	  min_kmers_in_common_(min_kmers_in_common), min_protein_len_(min_protein_len) {
 	
     };
     
-    void compute()
+    size_t compute(bool write_counts = true)
     {
 	/*
 	 * kmer_hit_map maps from a kmer to the set of IDs containing that kmer
 	 */
 	tbb::concurrent_unordered_map<Kmer<8>, tbb::concurrent_unordered_set<int>, tbb_hash<8>> kmer_hit_map;
 
-	auto hit_cb = [&kmer_hit_map, this](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+	auto hit_cb = [&kmer_hit_map, this](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd, Caller::kmer_db_type::encoded_key_type kidx) {
 	    // std::cerr << id << " " << seqlen << " " << kd << "\n";
-
 
 	    /*
 	     * Discard any hit that is outside either 2 standard deviations from the mean
 	     * (If we have a variance reported) or outside 20% of the reference sequence length.
 	     */
 
-	    int idx = idmap_.lookup_id(id);
-	
 	    double cutoff_b, cutoff_t;
 	    double mean = static_cast<double>(kd.mean);
 	    double stddev;
@@ -74,8 +76,10 @@ public:
 	    cutoff_b = mean - stddev * 2.0;
 	    cutoff_t = mean + stddev * 2.0;
 
-	    if (seqlen < cutoff_b || seqlen > cutoff_t)
+	    if (seqlen < cutoff_b || seqlen > cutoff_t || seqlen < min_protein_len_)
 		return;
+
+	    int idx = idmap_.lookup_id(id);
 
 	    kmer_hit_map[kmer].insert(idx);
 	};
@@ -85,7 +89,6 @@ public:
 	    prot_sizes.insert(std::make_pair(id, prot_len));
 	};
 
-	caller_.ignore_hypothetical(true);
 	std::string label;
 	for (auto in_file: in_files_)
 	{
@@ -117,7 +120,7 @@ public:
 	{
 	    if (verbose_)
 		std::cerr << "Skip compute " << in_files_[0] << "\n";
-	    return;
+	    return 0;
 	}
 
 	/*
@@ -163,18 +166,31 @@ public:
 		size_t len2 = prot_sizes[seq2];
 		int count = ent2.second;
 		float score = static_cast<float>(count) / static_cast<float>(len1 + len2);
-		ofstr << seq1 << "\t" << seq2 << "\t" << count << "\t" << score << "\n";
+		if (count >= min_kmers_in_common_)
+		{
+		    if (write_counts)
+		    {
+			ofstr << seq1 << "\t" << seq2 << "\t" << count << "\t" << score << "\n";
+		    }
+		    else
+		    {
+			ofstr << seq1 << "\t" << seq2 << "\t" << score << "\n";
+		    }
+		}
 	    }
 	}
+	return kmer_hit_map.size();
 
     };
 
 
 private:
     Caller &caller_;
-    const std::vector<fs::path> &in_files_;
-    const fs::path &out_file_;
+    const std::vector<fs::path> in_files_;
+    const fs::path out_file_;
     bool verbose_ = false;
+    int min_kmers_in_common_ = 1;
+    int min_protein_len_ = 0;
     SeqIdMap idmap_;
 };
 

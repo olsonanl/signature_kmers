@@ -12,6 +12,7 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_map.h>
 #include <tbb/concurrent_set.h>
+#include <tbb/parallel_for.h>
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/fstream.hpp>
@@ -38,6 +39,21 @@
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
 
+/*
+ * Ugh. cf https://github.com/boostorg/program_options/issues/69
+ * It's possible this isn't necessary if we use std::filesystem instead tho.
+ */
+
+namespace boost
+{
+    template <>
+    inline fs::path lexical_cast<fs::path, std::basic_string<char>>(const std::basic_string<char> &arg)
+    {
+	return fs::path(arg);
+    }
+}
+
+
 struct program_parameters
 {
     fs::path data_dir;
@@ -46,6 +62,8 @@ struct program_parameters
     bool debug_hits = false;
     bool verbose = false;
     int n_threads = 1;
+    int min_kmers_in_common = 1;
+    fs::path kmer_stats;
 };
 
 void process_options(int argc, char **argv, program_parameters &params)
@@ -55,12 +73,14 @@ void process_options(int argc, char **argv, program_parameters &params)
 
     po::options_description desc(x.str());
     desc.add_options()
+	("min-kmers-in-common", po::value<int>(&params.min_kmers_in_common), "Minimum number of signature kmers in common required to report a match")
 	("data-dir,d", po::value<fs::path>(&params.data_dir), "Data directory")
 	("input-dir", po::value<fs::path>(&params.input_dir), "Input directory")
 	("output-dir", po::value<fs::path>(&params.output_dir), "Output directory")
 	("n-threads,j", po::value<int>(&params.n_threads), "Number of threads")
 	("j", po::value<int>(&params.n_threads), "Number of threads")
 	("debug-hits", po::bool_switch(&params.debug_hits), "Debug kmer hits")
+	("kmer-stats", po::value<fs::path>(&params.kmer_stats), "Write kmer stats here")
 	("verbose", po::bool_switch(&params.verbose), "Enable verbose mode")
 	("help,h", "show this help message");
 
@@ -115,20 +135,38 @@ int main(int argc, char **argv)
 	}
     }
 
-    for (auto p: work)
+    if (false)
     {
-	std::cerr << p.first << " " << p.second << "\n";
+	for (auto p: work)
+	{
+	    std::cerr << p.first << " " << p.second << "\n";
+	}
     }
-
-    tbb::parallel_for(work.range(), [&caller, &params](auto r) {
+    tbb::concurrent_vector<std::pair<std::string, size_t>> stats;
+    bool save_stats = !params.kmer_stats.empty();
+    tbb::parallel_for(work.range(), [&caller, &params, save_stats, &stats](auto r) {
 	for (auto went: r)
 	{
 	    const fs::path &input = went.first;
 	    const fs::path &output = went.second;
 
-	    MatrixDistance<FunctionCaller<DbType>> md(caller, input, output, params.verbose);
-	    md.compute();
+	    MatrixDistance<FunctionCaller<DbType>> md(caller, input, output, params.verbose, params.min_kmers_in_common);
+//	    md.compute();
+	    size_t n_distinct_kmers = md.compute();
+	    if (save_stats)
+	    {
+		stats.push_back(std::make_pair(input.string(), n_distinct_kmers));
+	    }
 	}
     });
+    if (save_stats)
+    {
+	std::ofstream of(params.kmer_stats);
+	for (auto s: stats)
+	{
+	    of << s.first << "\t" << s.second << "\n";
+	}
+    }
+	
 }
 

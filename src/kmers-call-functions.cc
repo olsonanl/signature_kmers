@@ -32,6 +32,9 @@
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
 
+using DbType = CmphKmerDb<StoredKmerData, 8>;
+using Caller = FunctionCaller<DbType>;
+
 struct program_parameters
 {
     fs::path data_dir;
@@ -39,7 +42,6 @@ struct program_parameters
     fs::path output_file;
     std::vector<std::string> fasta_dirs;
     bool debug_hits = false;
-    bool ignore_hypo = false;
     int n_threads = 1;
 };
 
@@ -55,7 +57,6 @@ void process_options(int argc, char **argv, program_parameters &params)
 	("output-files,o", po::value<fs::path>(&params.output_file), "Output file")
 //	("fasta-dir,F", po::value<std::vector<std::string>>(&params.fasta_dirs)->multitoken(), "Directory of fasta files of protein data")
 	("n-threads,j", po::value<int>(&params.n_threads), "Number of threads")
-	("ignore-hypo", po::bool_switch(&params.ignore_hypo), "Ignore hypothetical protein kmers when making calls")
 	("debug-hits", po::bool_switch(&params.debug_hits), "Debug kmer hits")
 	("help,h", "show this help message");
 
@@ -87,14 +88,12 @@ int main(int argc, char **argv)
     process_options(argc, argv, params);
 
     std::cerr << "Data size " << sizeof(StoredKmerData) << "\n";
+    std::cerr << "UndefinedFunction=" << UndefinedFunction << "\n";
 
     tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, params.n_threads);
 
     auto db_base = params.data_dir / "kmer_data";
 
-    using DbType = CmphKmerDb<StoredKmerData, 8>;
-
-//    NuDBKmerDb<StoredKmerData, 8> nudb(db_base);
     DbType nudb(db_base);
 
     if (!nudb.exists())
@@ -103,21 +102,21 @@ int main(int argc, char **argv)
 	exit(1);
     }
     nudb.open();
-    FunctionCaller<DbType> caller(nudb, params.data_dir / "function.index");
-    caller.ignore_hypothetical(params.ignore_hypo);
+//    FunctionCaller<DbType> caller(nudb, params.data_dir / "function.index");
+    Caller caller(nudb, params.data_dir / "function.index");
 
-    using cbf = std::function<void(const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd)>;
+    using cbf = std::function<void(const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd, DbType::encoded_key_type kidx)>;
 
     cbf hit_cb;
     if (params.debug_hits)
     {
-	hit_cb = [&caller](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
-	    std::cout << kmer << "\t" << offset << "\t" << caller.function_at_index(kd.function_index) << "\t" << kd.median << "\t" << kd.mean << "\t" << kd.var << "\t" << sqrt(kd.var) << "\t" << "\n";
+	hit_cb = [&caller](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd, DbType::encoded_key_type kidx) {
+	    std::cout << kmer << "\t" << offset << "\t" << kd.function_index << "\t" << caller.function_at_index(kd.function_index) << "\t" << kd.median << "\t" << kd.mean << "\t" << kd.var << "\t" << sqrt(kd.var) << "\t" << "\n";
 	};
     }
     else
     {
-	hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {};
+	hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd, auto kidx) {};
     }
     
 /*

@@ -29,6 +29,24 @@
 namespace po = boost::program_options;
 namespace fs = boost::filesystem;
 
+/*
+ * Ugh. cf https://github.com/boostorg/program_options/issues/69
+ * It's possible this isn't necessary if we use std::filesystem instead tho.
+ */
+
+namespace boost
+{
+    template <>
+    inline fs::path lexical_cast<fs::path, std::basic_string<char>>(const std::basic_string<char> &arg)
+    {
+	return fs::path(arg);
+    }
+}
+
+
+using DbType = CmphKmerDb<StoredKmerData, 8>;
+using Caller = FunctionCaller<DbType>;
+
 struct program_parameters
 {
     fs::path data_dir;
@@ -36,8 +54,8 @@ struct program_parameters
     fs::path sequences_dir;
     fs::path calls_file;
     fs::path uncalled_ids_file;
-    bool ignore_hypo = false;
     int n_threads = 1;
+    Caller::OffLengthCallBehavior call_mode;
 };
 
 void process_options(int argc, char **argv, program_parameters &params)
@@ -47,13 +65,15 @@ void process_options(int argc, char **argv, program_parameters &params)
 
     po::options_description desc(x.str());
     desc.add_options()
+	("call-offlength-proteins", "Call offlength proteins")
+	("mark-offlength-proteins", "Call offlength proteins and mark with comments")
+	("ignore-offlength-proteins", "Do not call offlength proteins")
 	("kmer-data-dir,d", po::value<fs::path>(&params.data_dir), "Kmer data directory")
 	("genus-data-dir,g", po::value<fs::path>(&params.genus_data_dir), "Genus data directory")
 	("sequences-dir", po::value<fs::path>(&params.sequences_dir), "Sequence directory")
 	("calls-file", po::value<fs::path>(&params.calls_file), "Output calls file")
 	("uncalled-ids-file", po::value<fs::path>(&params.uncalled_ids_file), "Output uncalled IDs file")
 	("parallel,j", po::value<int>(&params.n_threads), "Number of threads")
-	("ignore-hypo", po::bool_switch(&params.ignore_hypo), "Ignore hypothetical protein kmers when making calls")
 	("help,h", "show this help message");
 
     po::positional_options_description pos;
@@ -74,6 +94,21 @@ void process_options(int argc, char **argv, program_parameters &params)
 	std::cout << desc << "\n";
 	exit(0);
     }
+
+    if (vm.count("call-offlength-proteins") +
+	vm.count("mark-offlength-proteins") +
+	vm.count("ignore-offlength-proteins") > 1)
+    {
+	std::cerr << "Only one of the offlength call options may be selected\n";
+	exit(1);
+    }
+    params.call_mode = Caller::OffLengthCall;
+    if (vm.count("call-offlength-proteins"))
+	params.call_mode = Caller::OffLengthCall;
+    if (vm.count("mark-offlength-proteins"))
+	params.call_mode = Caller::OffLengthMark;
+    if (vm.count("ignore-offlength-proteins"))
+	params.call_mode = Caller::OffLengthNoCall;
 }
 
 int main(int argc, char **argv)
@@ -85,8 +120,6 @@ int main(int argc, char **argv)
 
     auto db_base = params.data_dir / "kmer_data";
 
-    using DbType = CmphKmerDb<StoredKmerData, 8>;
-
     DbType kdb(db_base);
 
     if (!kdb.exists())
@@ -95,10 +128,12 @@ int main(int argc, char **argv)
 	exit(1);
     }
     kdb.open();
-    FunctionCaller<DbType> caller(kdb, params.data_dir / "function.index");
-    caller.ignore_hypothetical(params.ignore_hypo);
+    Caller caller_obj(kdb, params.data_dir / "function.index");
 
-    auto hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+    // Compile testing of const kmer calling
+    const Caller &caller = caller_obj;
+
+    auto hit_cb = [](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd, DbType::encoded_key_type kidx) {
     };
 
     fs::ofstream anno_out(params.calls_file);

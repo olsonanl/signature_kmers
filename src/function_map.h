@@ -59,7 +59,7 @@ public:
 
        The assignments we store have # comments stripped.
     */
-    void load_id_assignments(const fs::path &file) {
+    void load_id_assignments(const fs::path &file, bool keep_function_flag = false) {
 	fs::ifstream ifstr(file);
 	std::string line;
 	int lineno = 0;
@@ -99,6 +99,10 @@ public:
 	    }
 	    // std::string stripped = strip_func_comment(func);
 	    id_function_map_[id] = stripped;
+	    if (keep_function_flag)
+	    {
+		good_functions_.insert(stripped);
+	    }
 	    // std::cerr << "Load '" << id << "' as '" << func << "' stripped='" << stripped << "'\n";
 	}
     }
@@ -119,7 +123,7 @@ public:
      */
     void load_fasta_file(const fs::path &file, bool keep_function_flag, const std::set<std::string> &deleted_fids) {
 
-	const boost::regex genome_regex("\\s+(.*)\\s+\\[([^]]+)\\]$");
+	const boost::regex genome_regex("^(.*)\\s+\\[([^]]+)\\]$");
 	const boost::regex figid_regex("fig\\|(\\d+\\.\\d+)");
 	const boost::regex genome_id_regex("\\d+\\.\\d+");
 	
@@ -314,17 +318,23 @@ public:
 	 */
 	for (auto fn: ignored_functions)
 	{
-	    std::cerr << "Ignore '" << fn << "'\n";
-	    kept.erase(fn);
+	    // std::cerr << "Ignore '" << fn << "'\n";
+
+	    if (kept.erase(fn) > 0)
+	    {
+		kept_function_stream_ << "Removing " << fn << " due to ignored_functions list\n";
+	    }
 	}
 
 	/*
 	 * Assign sequential function IDs.
 	 */
-	unsigned short next = 0;
+	FunctionIndex next = 0;
 	for (auto f: kept)
 	{
-	    unsigned short id = next++;
+	    FunctionIndex id = next++;
+	    if (id == UndefinedFunction)
+		throw std::runtime_error("Too many functions, overran the FunctionIndex type");
 	    function_index_map_[f] = id;
 	    index_function_map_[id] = f;
 	}
@@ -374,10 +384,11 @@ public:
     }
     FunctionIndex lookup_index(const std::string &func) {
 	auto it = function_index_map_.find(func);
-	if (it == function_index_map_.end())
-	    return USHRT_MAX;
-	else
+	if (it == function_index_map_.end()) {
+	    return UndefinedFunction;
+	} else {
 	    return it->second;
+	}
     }
 
     /*! @brief Write the function index file

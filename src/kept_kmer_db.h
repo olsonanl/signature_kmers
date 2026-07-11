@@ -10,6 +10,8 @@ template <int K>
 class KeptKmerDB
 {
 public:
+    // We need this to compile properly but don't actually use it
+    typedef int encoded_key_type;
     static const int KmerSize = K;
     
     KeptKmerDB(const KeptKmers<K> &kk) :
@@ -23,6 +25,17 @@ public:
 	if (iter != kept_kmers_.end())
 	{
 	    cb(iter->second.stored_data);
+	}
+	ec = 0;
+    };
+
+    template <typename CB>
+    void fetch_with_id(const Kmer<K> &k, CB cb, int &ec) const
+    {
+	auto iter = kept_kmers_.find(k);
+	if (iter != kept_kmers_.end())
+	{
+	    cb(0, iter->second.stored_data);
 	}
 	ec = 0;
     };

@@ -120,7 +120,8 @@ int main(int argc, char **argv)
      */
     tbb::concurrent_unordered_map<Kmer<8>, tbb::concurrent_unordered_set<int>, tbb_hash<8>> kmer_hit_map;
 
-    auto hit_cb = [&kmer_hit_map, &idmap](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd) {
+    auto hit_cb = [&kmer_hit_map, &idmap](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &kd,
+					  DbType::encoded_key_type kidx) {
 	// std::cerr << id << " " << seqlen << " " << kd << "\n";
 
 
@@ -161,7 +162,6 @@ int main(int argc, char **argv)
 
     fs::ifstream ifstr(params.fasta_file);
 
-    caller.ignore_hypothetical(true);
     caller.process_fasta_stream_parallel(ifstr, hit_cb, call_cb, idmap);
 	    
     ifstr.close();

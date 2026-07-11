@@ -25,6 +25,7 @@ static bool process_command_line_options(int argc, char *argv[],
 					 std::vector<std::string> &good_roles,
 					 fs::path &deleted_fids_file,
 					 fs::path &ignored_functions_file,
+					 fs::path &function_override_file,
 					 int &min_reps_required,
 					 fs::path &kmer_data_dir,
 					 fs::path &final_kmers,
@@ -53,6 +54,7 @@ static bool process_command_line_options(int argc, char *argv[],
 	("good-roles", po::value<std::vector<std::string>>(&good_role_files), "File containing list of roles to be kept")
 	("deleted-features-file", po::value<fs::path>(&deleted_fids_file), "File containing list of deleted feature IDs")
 	("ignored-functions-file", po::value<fs::path>(&ignored_functions_file), "File containing list of functions for which we do not create signatures")
+	("function-override-file", po::value<fs::path>(&function_override_file), "File containing peg IDs and function which will override other definitions")
 	("kmer-data-dir", po::value<fs::path>(&kmer_data_dir), "Write kmer data files to this directory")
 	("nudb-file", po::value<std::string>(&nudb_file), "Write saved kmers to this NuDB file base. Should be on a SSD drive.")
 	("min-reps-required", po::value<int>(&min_reps_required), "Minimum number of genomes a function must be seen in to be considered for kmers")
@@ -123,6 +125,14 @@ void write_nudb_data(const std::string &nudb_file, const KeptKmers<8> &kmers)
     }
 }
 
+void verify_file(const fs::path &path)
+{
+    if (!path.empty() && !fs::exists(path))
+    {
+	std::cerr << "Input file " << path << " does not exist\n";
+	exit(1);
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -137,6 +147,7 @@ int main(int argc, char *argv[])
     fs::path deleted_fids_file;
     fs::path kmer_data_dir;
     fs::path ignored_functions_file;
+    fs::path function_override_file;
 
     int min_reps_required = 3;
     
@@ -154,6 +165,7 @@ int main(int argc, char *argv[])
 				      good_roles,
 				      deleted_fids_file,
 				      ignored_functions_file,
+				      function_override_file,
 				      min_reps_required,
 				      kmer_data_dir,
 				      final_kmers,
@@ -165,14 +177,23 @@ int main(int argc, char *argv[])
 	return 1;
     }
 
+    verify_file(deleted_fids_file);
+    verify_file(ignored_functions_file);
+    verify_file(function_override_file);
+    for (auto f: function_definitions)
+	verify_file(f);
+
+
     tbb::global_control global_limit(tbb::global_control::max_allowed_parallelism, n_threads);
 
     std::set<std::string> deleted_fids = load_set_from_file(deleted_fids_file);
     std::set<std::string> ignored_functions = load_set_from_file(ignored_functions_file);
 
-    SignatureBuilder<K> builder(n_threads, MaxSequencesPerFile);
+    fs::path kept_file = kmer_data_dir / "kept-genomes.log";
+    std::string kept_file_str = kept_file.string();
+    SignatureBuilder<K> builder(n_threads, MaxSequencesPerFile, kept_file_str);
 
-    builder.load_function_data(good_functions, good_roles, function_definitions);
+    builder.load_function_data(good_functions, good_roles, function_definitions, function_override_file);
 
     ensure_directory(kmer_data_dir);
 
@@ -239,7 +260,7 @@ int main(int argc, char *argv[])
     KeptKmerDB<K>  kdb(builder.kept_kmers());
 
     fs::path report_dir = kmer_data_dir / "recall.report.d";
-    if (!fs::create_directory(report_dir))
+    if (!fs::is_directory(report_dir) && !fs::create_directory(report_dir))
     {
 	std::cerr << "mkdir " << report_dir << " failed\n";
     }
@@ -276,7 +297,7 @@ int main(int argc, char *argv[])
 	std::string old_func;
 	std::string old_func_stripped;
 	std::string new_func;
-	int func_index;
+	FunctionIndex func_index;
 	float score;
     };
     tbb::concurrent_map<std::string, call_data> recall_report;
@@ -286,7 +307,7 @@ int main(int argc, char *argv[])
 	const FunctionMap &fm;
 	std::map<std::string, call_data> data;
 	
-	void operator()(const std::string &id, const std::string &func, int func_index, float score, size_t seq_len) {
+	void operator()(const std::string &id, const std::string &func, FunctionIndex func_index, float score, size_t seq_len) {
 
 	    std::string orig, orig_stripped;
 	    fm.lookup_original_assignment(id, orig, orig_stripped);
@@ -310,7 +331,7 @@ int main(int argc, char *argv[])
 	
     };
 
-    auto hit_cb = [&builder](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &k) {
+    auto hit_cb = [&builder](const std::string &id, const Kmer<8> &kmer, size_t offset, double seqlen, const StoredKmerData &k, KeptKmerDB<K>::encoded_key_type kidx) {
 
 	if (false)
 	{

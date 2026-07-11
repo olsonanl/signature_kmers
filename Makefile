@@ -6,7 +6,7 @@ TARGET ?= /kb/deployment
 
 APP_SERVICE = app_service
 
-APP_CXX = kmers-call-functions kmers-build-signatures kmers-matrix-distance kmers-matrix-distance-folder kmers-annotate-seqs kmers-matrix-distance-merge
+APP_CXX = kmers-call-functions kmers-build-signatures kmers-matrix-distance kmers-matrix-distance-folder kmers-annotate-seqs kmers-matrix-distance-merge kmers-matrix-distance-files
 BIN_CXX = $(addprefix $(BIN_DIR)/,$(APP_CXX))
 DEPLOY_CXX = $(addprefix $(TARGET)/bin,$(APP_CXX))
 
@@ -41,11 +41,13 @@ bin: NuDB $(BIN_PERL) $(BIN_SERVICE_PERL) $(BIN_CXX)
 
 #PROFILE = -pg
 OPT = -O3
-DEBUG = -g
+#DEBUG = -g -O
 INC = $(BOOST_INC) $(TBB_FLAGS) $(NUDB_INCLUDE) $(CMPH_INCLUDE)
 
+# cf https://undo.io/resources/making-cpp-safer/
+DEFS = -D_GLIBCXX_ASSERTIONS
 
-CXXFLAGS = $(PROFILE) $(DEBUG) $(OPT) $(INC) -std=c++20
+CXXFLAGS = $(DEFS) $(PROFILE) $(DEBUG) $(OPT) $(INC) -std=c++20
 LDFLAGS = -Wl,-rpath,$(BOOST)/lib -Wl,-rpath,$(CMPH)/lib $(PROFILE)
 
 LIBS = $(BOOST_LIBS) $(TBB_LIBS) $(CMPH_LIB)
@@ -73,6 +75,14 @@ CMPH_LIB = -L$(CMPH)/lib -lcmph
 NUDB = NuDB
 NUDB_INCLUDE = -I$(NUDB)/include
 
+TEST_FASTA_PARSE_OBJS = src/test-fasta-parse.o src/fasta_parser.o
+test-fasta-parse: $(TEST_FASTA_PARSE_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(TEST_FASTA_PARSE_OBJS) $(LIBS)
+
+KMERS_SERVER_OBJS = src/kmers-server.o src/fasta_parser.o
+kmers-server: NuDB $(KMERS_SERVER_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_SERVER_OBJS) $(LIBS)
+
 KMERS_ANNOTATE_SEQS_OBJS = src/kmers-annotate-seqs.o src/fasta_parser.o
 kmers-annotate-seqs: NuDB $(KMERS_ANNOTATE_SEQS_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_ANNOTATE_SEQS_OBJS) $(LIBS)
@@ -84,6 +94,10 @@ kmers-call-functions: NuDB $(KMERS_CALL_FUNCTIONS_OBJS)
 KMERS_MATRIX_DISTANCE_FOLDER_OBJS = src/kmers-matrix-distance-folder.o src/fasta_parser.o
 kmers-matrix-distance-folder: $(KMERS_MATRIX_DISTANCE_FOLDER_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $(KMERS_MATRIX_DISTANCE_FOLDER_OBJS) $(LIBS)
+
+KMERS_MATRIX_DISTANCE_FILES_OBJS = src/kmers-matrix-distance-files.o src/fasta_parser.o
+kmers-matrix-distance-files: $(KMERS_MATRIX_DISTANCE_FILES_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $(KMERS_MATRIX_DISTANCE_FILES_OBJS) $(LIBS)
 
 KMERS_MATRIX_DISTANCE_MERGE_OBJS = src/kmers-matrix-distance-merge.o src/fasta_parser.o
 kmers-matrix-distance-merge: $(KMERS_MATRIX_DISTANCE_MERGE_OBJS)

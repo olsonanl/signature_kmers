@@ -32,7 +32,8 @@ public:
     static constexpr int KmerSize = K;
     using KData = StoredData;
     using key_type = Kmer<K>;
-
+    using encoded_key_type = unsigned int;
+    
     CmphKmerDb(const fs::path &file_base)
 	: file_base_(file_base)
 	, dat_path_(file_base.native() + ".dat")
@@ -82,12 +83,12 @@ public:
 	std::cerr << "Madvise done\n";
     }
 
-    unsigned int lookup_key(const std::string &key) {
+    unsigned int lookup_key(const std::string &key) const {
 	unsigned int id = cmph_search(hash_, key.c_str(), key.length());
 	return id;
     }
 
-    unsigned int lookup_key(const Kmer<K> key) {
+    unsigned int lookup_key(const Kmer<K> key) const {
 	unsigned int id = cmph_search(hash_, key.data(), K);
 	return id;
     }
@@ -103,16 +104,16 @@ public:
 	fclose(fp);
     }
 	
-    unsigned int hash_size() {
+    unsigned int hash_size() const {
 	return hash_size_;
     }
 
 
-    bool exists() {
+    bool exists() const {
 	return fs::exists(dat_path_);
     }
 
-    key_type convert_key(const std::string &key) {
+    key_type convert_key(const std::string &key) const {
 	key_type ka;
 	if (key.length() != kmer_size)
 	    throw std::runtime_error("Invalid kmer size");
@@ -136,7 +137,7 @@ public:
     }
 
     template <typename CB>
-    void fetch(const key_type &key, CB cb, int &iec) {
+    void fetch(const key_type &key, CB cb, int &iec) const {
 	unsigned int kidx = lookup_key(key);
 	if (kidx < 0 || kidx >= hash_size_)
 	{
@@ -146,7 +147,17 @@ public:
 	cb(data_[kidx]);
     }
     template <typename CB>
-    void fetch(const std::string &key, CB cb, int &iec) {
+    void fetch_with_id(const key_type &key, CB cb, int &iec) const {
+	unsigned int kidx = lookup_key(key);
+	if (kidx < 0 || kidx >= hash_size_)
+	{
+	    iec = 1;
+	    return;
+	}
+	cb(kidx, data_[kidx]);
+    }
+    template <typename CB>
+    void fetch(const std::string &key, CB cb, int &iec) const {
 	fetch(convert_key(key), cb, iec);
     }
 

@@ -12,6 +12,7 @@ public:
     enum state {
 	s_start = 0,
 	s_id,
+	s_defline_start,
 	s_defline,
 	s_data,
 	s_id_or_data,
@@ -64,8 +65,7 @@ public:
 	case s_id:
 	    if (isblank(c))
 	    {
-		cur_def_.push_back(c);
-		cur_state_ = s_defline;
+		cur_state_ = s_defline_start;
 	    }
 	    else if (c == '\n')
 	    {
@@ -74,6 +74,18 @@ public:
 	    else
 	    {
 		cur_id_.push_back(c);
+	    }
+	    break;
+
+	case s_defline_start:
+	    if (c == '\n')
+	    {
+		cur_state_ = s_data;
+	    }
+	    else if (!isblank(c))
+	    {
+		cur_state_ = s_defline;
+		cur_def_.push_back(c);
 	    }
 	    break;
 
@@ -157,6 +169,8 @@ private:
     std::function<bool(const std::string &err, int line, const std::string id)> on_error_;
     void call_callback()
     {
+	if (cur_id_.empty())
+	    return;
 	if (on_seq_)
 	    on_seq_(cur_id_, cur_seq_);
 	if (on_def_seq_)

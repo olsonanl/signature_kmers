@@ -15,7 +15,7 @@
  * Function indexes are use to reference the entries in function.index
  * which represent function strings assigned to proteins.
  */
-typedef uint16_t FunctionIndex;
+typedef uint32_t FunctionIndex;
 
 /**
  * Value representing a missing or undefined function.
@@ -31,7 +31,7 @@ typedef uint16_t OTUIndex;
 /**
  * Value representing a missing or undefined function.
  */
-const FunctionIndex UndefinedOTU = std::numeric_limits<FunctionIndex>::max();
+const OTUIndex UndefinedOTU = std::numeric_limits<OTUIndex>::max();
 
 template <int K>
 using Kmer = std::array<char, K>;
@@ -119,12 +119,12 @@ struct StoredKmerData
       These is the data that is stored in the database for each signature kmer.
     */
 
-    uint16_t  avg_from_end = 0;
-    FunctionIndex function_index = UndefinedFunction;
+    uint16_t  avg_from_end = 0;	// 2 bytes
+    FunctionIndex function_index = UndefinedFunction; // 4 bytes
     
-    uint16_t mean = 0;
-    uint16_t median = 0;
-    uint16_t var = 0;
+    uint16_t mean = 0;		//  2 bytes
+    uint16_t median = 0;	// 2 bytes
+    uint16_t var = 0;		// 2 bytes = total 12 bytes
 };
 
 inline std::ostream &operator<<(std::ostream &os, const StoredKmerData &c)

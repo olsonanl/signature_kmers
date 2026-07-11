@@ -1,8 +1,9 @@
 
 template <int K>
-SignatureBuilder<K>::SignatureBuilder(int n_threads, int max_seqs_per_file) :
+SignatureBuilder<K>::SignatureBuilder(int n_threads, int max_seqs_per_file, const std::string &kept_file) :
     n_threads_(n_threads),
-    max_seqs_per_file_(max_seqs_per_file)
+    max_seqs_per_file_(max_seqs_per_file),
+    fm_(kept_file)
 {
 }
 
@@ -10,7 +11,8 @@ SignatureBuilder<K>::SignatureBuilder(int n_threads, int max_seqs_per_file) :
 template <int K>
 void SignatureBuilder<K>::load_function_data(const std::vector<std::string> &good_functions,
 					     const std::vector<std::string> &good_roles,
-					     const std::vector<fs::path> &function_definitions)
+					     const std::vector<fs::path> &function_definitions,
+					     const fs::path &function_override_file)
 {
     fm_.add_good_roles(good_roles);
     fm_.add_good_functions(good_functions);
@@ -19,7 +21,10 @@ void SignatureBuilder<K>::load_function_data(const std::vector<std::string> &goo
     {
 	fm_.load_id_assignments(def);
     }
-
+    if (!function_override_file.empty())
+    {
+	fm_.load_id_assignments(function_override_file, true);
+    }
 }
 
 template <int K>
@@ -29,13 +34,15 @@ void SignatureBuilder<K>::load_fasta(const std::vector<fs::path> &fasta_files,
 {
     for (auto fasta: fasta_files)
     {
-	fm_.load_fasta_file(fasta, false, deleted_fids);
+	fm_.load_fasta_file(fasta, keep_functions, deleted_fids);
 	all_fasta_data_.emplace_back(fasta);
     }
 }
 
 template <int K>
-void SignatureBuilder<K>::process_kept_functions(int min_reps_required, const fs::path &output_dir, std::set<std::string> &ignored_functions)
+void SignatureBuilder<K>::process_kept_functions(int min_reps_required,
+						 const fs::path &output_dir,
+						 std::set<std::string> &ignored_functions)
 {
     fm_.process_kept_functions(min_reps_required, ignored_functions);
     if (!output_dir.empty())
@@ -225,7 +232,7 @@ void SignatureBuilder<K>::process_kmer_set(KmerSet &set)
     // we want the top two elements by value in the map; don't know how
     // with standard STL without copying to a vector, but if we're copying
     // anyway we can just search for them.
-    for (auto x: set.func_count)
+    for (auto &x: set.func_count)
     {
 	if (best_func_1 == UndefinedFunction)
 	{
@@ -263,20 +270,66 @@ void SignatureBuilder<K>::process_kmer_set(KmerSet &set)
 						  acc::tag::median,
 						  acc::tag::variance> > acc;
 
-    for (auto item: set.set)
+
+    unsigned short median, mean, var;
+
+    std::array<char, 8> x{'K','P', 'Y', 'V', 'S', 'G', 'F', 'R'};
+    std::ostringstream ostr;
+    bool dbg = (set.kmer == x);
+//    bool dbg = false;
+    /*
+     * Special case for singleton sets.
+     */
+    if (set.set.size() == 1)
     {
-	if (item.func_index == best_func)
-	{
-//	    seqs_containing_func++;
-	    acc(item.protein_length);
-	}
+	auto &item = set.set[0];
+	median = mean = item.protein_length;
+	var = 0;
 	offsets.push_back(item.offset);
 	kmer_stats_.seqs_with_a_signature.insert(item.seq_id);
     }
+    else if (set.set.size() == 2)
+    {
+	auto &item1 = set.set[0];
+	auto &item2 = set.set[1];
+	median = mean = (item1.protein_length + item2.protein_length) / 2;
+	var = 0;
+	offsets.push_back(item1.offset);
+	offsets.push_back(item2.offset);
+	kmer_stats_.seqs_with_a_signature.insert(item1.seq_id);
+	kmer_stats_.seqs_with_a_signature.insert(item2.seq_id);
+    }
+    else
+    {
+	for (auto &item: set.set)
+	{
+	    if (item.func_index == best_func)
+	    {
+//	    seqs_containing_func++;
+		acc(item.protein_length);
+		if (dbg)
+		    ostr << set.kmer << " add prot len " << item.protein_length << "\n";
+	    }
+	    offsets.push_back(item.offset);
+	    kmer_stats_.seqs_with_a_signature.insert(item.seq_id);
+	}
 
-    unsigned short mean = acc::mean(acc);
-    unsigned short median = acc::median(acc);
-    unsigned short var = acc::variance(acc);
+	mean = acc::mean(acc);
+	median = acc::median(acc);
+	var = acc::variance(acc);
+    }
+
+//    dbg = (median == 0);
+    if (dbg) {
+	const std::lock_guard<std::mutex> lock(io_mutex_);
+	std::cerr << set.kmer << " median=" << median << " mean=" << mean << " best=" << best_func << " count=" << acc::count(acc) << "\n";
+	std::cerr << ostr.str();
+	for (auto &item: set.set)
+	{
+	    std::cerr << item.func_index << "," << item.protein_length << " ";
+	}
+	std::cerr << "\n";
+    }
 
     std::sort(offsets.begin(), offsets.end());
     unsigned short avg_from_end = offsets[offsets.size() / 2];

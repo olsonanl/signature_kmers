@@ -77,7 +77,7 @@ template <typename K, typename V>
     return vec;
 }
 
-std::vector<std::string> split(const std::string &s, const std::string &delim){
+inline std::vector<std::string> split(const std::string &s, const std::string &delim){
     std::vector<std::string> result;
     int start = 0;
     std::string::size_type end = 0;

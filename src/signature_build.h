@@ -11,6 +11,9 @@
 #include <tbb/concurrent_unordered_set.h>
 #include <tbb/concurrent_vector.h>
 #include <tbb/parallel_for.h>
+#include <numeric>
+#include <limits>
+#include <algorithm>
 
 #include <boost/accumulators/accumulators.hpp>
 #include <boost/accumulators/statistics/stats.hpp>
@@ -56,29 +59,35 @@ template <int K>
 class SignatureBuilder
 {
 public:
-    SignatureBuilder(int n_threads, int max_seqs_per_file);
+    SignatureBuilder(int n_threads, int max_seqs_per_file, const std::string &kept_file);
     
     using KmerAttributeMap =  tbb::concurrent_unordered_multimap<Kmer<K>, KmerAttributes, tbb_hash<K>>;
 
     void load_function_data(const std::vector<std::string> &good_functions,
 			    const std::vector<std::string> &good_roles,
-			    const std::vector<fs::path> &function_definitions);
+			    const std::vector<fs::path> &function_definitions,
+			    const fs::path &function_override_file);
 		   
     void load_fasta(const std::vector<fs::path> &fasta_files, bool keep_functions,
 		    const std::set<std::string> &deleted_fids);
 
-    void process_kept_functions(int min_reps_required, const fs::path &function_index_file, std::set<std::string> &ignored_functions);
+    void process_kept_functions(int min_reps_required,
+				const fs::path &function_index_file,
+				std::set<std::string> &ignored_functions);
 
     void extract_kmers(const std::set<std::string> &deleted_fids);
     void process_kmers();
 
 private:
+    std::mutex io_mutex_;
+
     void load_kmers_from_fasta(unsigned file_number, const fs::path &file,
 			       const std::set<std::string> &deleted_fids);
 
     void load_kmers_from_sequence(unsigned int &next_sequence_id,
 				  const std::string &id, const std::string &def, const std::string &seq);
 
+public:
     struct KmerSet
     {
         KmerSet() : count(0) {}
@@ -93,7 +102,7 @@ private:
 	int count;
 	std::vector<KmerAttributes> set;
     };
-
+private:
 
     KeptKmers<K> kept_kmers_;
     
